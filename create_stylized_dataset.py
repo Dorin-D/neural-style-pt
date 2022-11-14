@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
-
+#from neural_style import style_transfer
 """
 train/test set for each style
 TODO: report update
@@ -11,6 +11,20 @@ TODO: Upload code
 
 """
 
+def style_transfer(style_location, content_location, output_location,
+    p_style_weight=1e2, p_content_weight=5e0, p_num_iterations=1000, p_learning_rate = 1e0, 
+    p_gpu=0, p_image_size=512, p_style_blend_weights=None, p_normalize_weights=False, p_normalize_gradients=False, p_tv_weight=1e-3, p_init='random', p_init_image=None, p_optimizer='lbfgs', 
+    p_lbfgs_num_correction=100,
+    p_print_iter=0, p_save_iter=0, p_style_scale=1.0, p_original_colors = 0, p_model_file='models/vgg19-d01eb7cb.pth', p_disable_check=False, 
+    p_backend='nn', p_cudnn_autotune=False, p_pooling='max',
+    p_seed=-1, p_content_layers='relu4_2', p_style_layers='relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', p_multidevice_strategy='4,7,29'):
+    """
+    Temporary function to ensure code runs smoothly.
+    """
+    with open(output_location, "w") as file:
+        file.write(style_location + "\n")
+        file.write(content_location)
+    return 0
 
 def choose_classes(labels, n_classes, n_train, n_test):
     """
@@ -79,7 +93,36 @@ def choose_styles(labels, n_styles):
             break
     return chosen_styles
  
-def create_stylized_dataset(location, location_styles, n_classes, n_styles, n_train, n_test, p_train, output_label):
+def choose_style_image(style_location, style):
+    """
+    Given a style, finds its associated images using the label file in style_location and returns a random filename of the style.
+    parameters:
+        style_location: location containing the folder with style images and the label.csv
+        style: name of the style
+    returns:
+        chosen_image: location of the chosen style image
+    """
+
+    label = os.path.join(style_location, "labels.csv")
+    images_location = os.path.join(style_location, "data")
+
+    label_csv = pd.read_csv(label)
+    
+    #get all filenames of images of said style
+    style_images = label_csv.loc[label_csv['label']==style]['filename']
+    #choose a random image from this list
+    random_index = int(len(style_images) * np.random.rand(1))
+    chosen_image = style_images.iloc[random_index]
+    return chosen_image
+
+def create_stylized_dataset(location, location_styles, n_classes, n_styles, n_train, n_test, p_train, output_location,
+        #the rest are neural style transfer arguments
+        p_style_weight=1e2, p_content_weight=5e0, p_num_iterations=1000, p_learning_rate = 1e0, 
+        p_gpu=0, p_image_size=512, p_style_blend_weights=None, p_normalize_weights=False, p_normalize_gradients=False, p_tv_weight=1e-3, p_init='random', p_init_image=None, p_optimizer='lbfgs', 
+        p_lbfgs_num_correction=100,
+        p_print_iter=0, p_save_iter=0, p_style_scale=1.0, p_original_colors = 0, p_model_file='models/vgg19-d01eb7cb.pth', p_disable_check=False, 
+        p_backend='nn', p_cudnn_autotune=False, p_pooling='max',
+        p_seed=-1, p_content_layers='relu4_2', p_style_layers='relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', p_multidevice_strategy='4,7,29'):
     #any arguments for neural style transfer)
     """
     Given a domain, extracts (n_train, n_test) samples from n_classes. It assigns a dominant style to each class. For the class, 
@@ -114,6 +157,7 @@ def create_stylized_dataset(location, location_styles, n_classes, n_styles, n_tr
         n_test: amount of test samples per class
             (n_train, n_test) should be equal?
         p_train: amount of bias in train set (p=0.9 => 90% of images will be of dominant class)
+        output_location: location where to output the label, data
     output:
         tbd
     """
@@ -213,39 +257,56 @@ def create_stylized_dataset(location, location_styles, n_classes, n_styles, n_tr
         labels_wstyles = pd.concat((labels_wstyles, chosen_trains), ignore_index=True)
         labels_wstyles = pd.concat((labels_wstyles, chosen_tests), ignore_index=True)
 
+    #for all entries, choose a style image of given style
+    style_location_list = []
+    for index,row in labels_wstyles.iterrows():
+        style_location_list.append(choose_style_image(location_styles, row['style']))
 
-    #TODO: add neural style transfer
+    style_location_df = pd.DataFrame(style_location_list, columns=['style_location'])
+    labels_wstyles['style_location'] = style_location_df
+
+    #TODO: add neural style transferoutput_location
     #TODO: formalize output
     output_label = os.path.join(output_location, 'label.csv')
+    output_data = os.path.join(output_location, "data")
+
+    #create folders necessary for output_data (and output_label)
+    os.makedirs(output_data, exist_ok=True)
+    
+    
     labels_wstyles.to_csv(output_label)
 
+    #create stylised dataset
+    for index,row in labels_wstyles.iterrows():
+        location_style_image = os.path.join(location_styles, "data", row['style_location'])
+        location_content_image = os.path.join(location, "data", row['filename'])
+        location_output_image = os.path.join(output_location, "data", row['filename'])
+        style_transfer(location_style_image, location_content_image, location_output_image,
+        p_style_weight, p_content_weight, p_num_iterations, p_learning_rate, 
+        p_gpu, p_image_size, p_style_blend_weights, p_normalize_weights, p_normalize_gradients, p_tv_weight, p_init, p_init_image, 
+        p_optimizer, p_lbfgs_num_correction,
+        p_print_iter, p_save_iter, p_style_scale, p_original_colors, p_model_file, p_disable_check, 
+        p_backend, p_cudnn_autotune, p_pooling,
+        p_seed, p_content_layers, p_style_layers, p_multidevice_strategy)
 
     return 0
 
 
-location = "/mnt/d0acc65e-8a85-435e-82fc-2ec7d0dbef67/University_And_Others/Paris-Saclay/Creation of an AI challenge challenge/Style-Trans-Fair/Datasets/MetaAlbum/PlantDiseases"
-location_styles = "/mnt/d0acc65e-8a85-435e-82fc-2ec7d0dbef67/University_And_Others/Paris-Saclay/Creation of an AI challenge challenge/Style-Trans-Fair/Datasets/MetaAlbum/Styles"
-n_classes = 3
-n_styles = 3
-n_train = 40
-n_test = 40
-p_train = 0.8
-create_stylized_dataset(location, location_styles, n_classes, n_styles, n_train, n_test, p_train)
+def main():
+    location = "/mnt/d0acc65e-8a85-435e-82fc-2ec7d0dbef67/University_And_Others/Paris-Saclay/Creation of an AI challenge challenge/Style-Trans-Fair/Datasets/MetaAlbum/PlantDiseases"
+    location_styles = "/mnt/d0acc65e-8a85-435e-82fc-2ec7d0dbef67/University_And_Others/Paris-Saclay/Creation of an AI challenge challenge/Style-Trans-Fair/Datasets/MetaAlbum/Styles"
+    n_classes = 3
+    n_styles = 3
+    n_train = 40
+    n_test = 40
+    p_train = 0.8
+
+    output_location = "/mnt/d0acc65e-8a85-435e-82fc-2ec7d0dbef67/University_And_Others/Paris-Saclay/Creation of an AI challenge challenge/Style-Trans-Fair/Datasets/MetaAlbum/Stylized_Beta"
+    create_stylized_dataset(location, location_styles, n_classes, n_styles, n_train, n_test, p_train, output_location)
 
 
-
-
-
-
-
-
-
-def choose_image_style(content, style, test_train_split):
-    """
-    neural style transferred image given style from test or train split
-    """
-
-
+if __name__ == "__main__":
+    main()
 
 
 
