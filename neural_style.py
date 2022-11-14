@@ -26,7 +26,7 @@ def style_transfer(style_location, content_location, output_location,
     dtype, multidevice, backward_device = setup_gpu()
     cnn, layerList = loadCaffemodel(model_file, pooling, gpu, disable_check)
 
-    content_image = preprocess(style_location, image_size).type(dtype)
+    content_image = preprocess(content_location, image_size).type(dtype)
     style_image_input = style_location.split(',')
     style_image_list, ext = [], [".jpg", ".jpeg", ".png", ".tiff"]
     for image in style_image_input:
