@@ -23,8 +23,8 @@ def style_transfer(style_location, content_location, output_location,
     p_backend='nn', p_cudnn_autotune=False, p_pooling='max',
     p_seed=-1, p_content_layers='relu4_2', p_style_layers='relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', p_multidevice_strategy='4,7,29'):
 
-    dtype, multidevice, backward_device = setup_gpu()
-    cnn, layerList = loadCaffemodel(model_file, pooling, gpu, disable_check)
+    dtype, multidevice, backward_device = setup_gpu(p_backend, p_cudnn_autotune, p_gpu)
+    cnn, layerList = loadCaffemodel(p_model_file, p_pooling, p_gpu, p_disable_check)
 
     content_image = preprocess(content_location, image_size).type(dtype)
     style_image_input = style_location.split(',')
@@ -121,7 +121,7 @@ def style_transfer(style_location, content_location, output_location,
                 net.add_module(str(len(net)), layer)
 
     if multidevice:
-        net = setup_multi_device(net)
+        net = setup_multi_device(net, p_gpu, p_multidevice_strategy)
 
     # Capture content targets
     for i in content_losses:
@@ -224,13 +224,13 @@ def style_transfer(style_location, content_location, output_location,
 
         return loss
 
-    optimizer, loopVal = setup_optimizer(img)
+    optimizer, loopVal = setup_optimizer(img, p_optimizer, p_num_iterations, p_lbfgs_num_correction, p_learning_rate)
     while num_calls[0] <= loopVal:
          optimizer.step(feval)
 
 
 # Configure the optimizer
-def setup_optimizer(img):
+def setup_optimizer(img, p_optimizer, p_num_iterations, p_lbfgs_num_correction, p_learning_rate):
     if p_optimizer == 'lbfgs':
         print("Running optimization with L-BFGS")
         optim_state = {
@@ -249,7 +249,7 @@ def setup_optimizer(img):
     return optimizer, loopVal
 
 
-def setup_gpu():
+def setup_gpu(p_backend, p_cudnn_autotune, p_gpu):
     def setup_cuda():
         if 'cudnn' in p_backend:
             torch.backends.cudnn.enabled = True
@@ -288,7 +288,7 @@ def setup_gpu():
     return dtype, multidevice, backward_device
 
 
-def setup_multi_device(net):
+def setup_multi_device(net, p_gpu, p_multidevice_strategy):
     assert len(p_gpu.split(',')) - 1 == len(p_multidevice_strategy.split(',')), \
       "The number of -multidevice_strategy layer indices minus 1, must be equal to the number of -gpu devices."
 
@@ -453,8 +453,8 @@ class TVLoss(nn.Module):
         return input
 
 
-if __name__ == "__main__":
-    main()
+#if __name__ == "__main__":
+#    main()
     
     
     
