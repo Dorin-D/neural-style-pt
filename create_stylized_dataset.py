@@ -6,9 +6,6 @@ import numpy as np
 train/test set for each style
 TODO: report update
 TODO: add github to beginning of report
-TODO: add gabriel to github
-TODO: Upload code
-
 """
 
 def style_transfer(style_location, content_location, output_location,
@@ -116,21 +113,19 @@ def choose_style_image(style_location, style):
     return chosen_image
 
 def create_stylized_dataset(location, location_styles, n_classes, n_styles, n_train, n_test, p_train, output_location,
-        #the rest are neural style transfer arguments
+        #the rest are remaining neural style transfer arguments
         p_style_weight=1e2, p_content_weight=5e0, p_num_iterations=1000, p_learning_rate = 1e0, 
         p_gpu=0, p_image_size=512, p_style_blend_weights=None, p_normalize_weights=False, p_normalize_gradients=False, p_tv_weight=1e-3, p_init='random', p_init_image=None, p_optimizer='lbfgs', 
         p_lbfgs_num_correction=100,
         p_print_iter=0, p_save_iter=0, p_style_scale=1.0, p_original_colors = 0, p_model_file='models/vgg19-d01eb7cb.pth', p_disable_check=False, 
         p_backend='nn', p_cudnn_autotune=False, p_pooling='max',
         p_seed=-1, p_content_layers='relu4_2', p_style_layers='relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', p_multidevice_strategy='4,7,29'):
-    #any arguments for neural style transfer)
     """
     Given a domain, extracts (n_train, n_test) samples from n_classes. It assigns a dominant style to each class. For the class, 
         it assigns p_train*n_train (rounded down) samples to the dominant style, and (1-p_train)/(n_styles-1) (rounded down) samples to the non-dominant styles.
         Samples which are left out (due to rounding down) are assigned the dominant style. 
         Generates a .csv file which contains the filenames, the classes, the splits and the assigned style to them.
         TODO: Apply neural style transfer and create the actual datasets.
-        TODO: keep content and style filenames
     parameters:
         location: the location of the domain to be used; format:
             location_folder
@@ -262,8 +257,8 @@ def create_stylized_dataset(location, location_styles, n_classes, n_styles, n_tr
     for index,row in labels_wstyles.iterrows():
         style_location_list.append(choose_style_image(location_styles, row['style']))
 
-    style_location_df = pd.DataFrame(style_location_list, columns=['style_location'])
-    labels_wstyles['style_location'] = style_location_df
+    style_location_df = pd.DataFrame(style_location_list, columns=['style_filename'])
+    labels_wstyles['style_filename'] = style_location_df
 
     #TODO: add neural style transferoutput_location
     #TODO: formalize output
@@ -278,7 +273,7 @@ def create_stylized_dataset(location, location_styles, n_classes, n_styles, n_tr
 
     #create stylised dataset
     for index,row in labels_wstyles.iterrows():
-        location_style_image = os.path.join(location_styles, "data", row['style_location'])
+        location_style_image = os.path.join(location_styles, "data", row['style_filename'])
         location_content_image = os.path.join(location, "data", row['filename'])
         location_output_image = os.path.join(output_location, "data", row['filename'])
         style_transfer(location_style_image, location_content_image, location_output_image,
