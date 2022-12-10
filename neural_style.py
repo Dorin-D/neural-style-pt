@@ -1,3 +1,5 @@
+# %% [code]
+# %% [code] {"jupyter":{"outputs_hidden":false},"execution":{"iopub.status.busy":"2022-11-19T17:32:28.174546Z","iopub.execute_input":"2022-11-19T17:32:28.174983Z","iopub.status.idle":"2022-11-19T17:32:28.403260Z","shell.execute_reply.started":"2022-11-19T17:32:28.174944Z","shell.execute_reply":"2022-11-19T17:32:28.402382Z"}}
 import os
 import copy
 import torch
@@ -6,28 +8,67 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 
 from PIL import Image
-from CaffeLoader import loadCaffemodel, ModelParallel
+from caffeloader import loadCaffemodel, ModelParallel
+
+import download_models
+
+import argparse
+parser = argparse.ArgumentParser()
+# Basic options
+parser.add_argument("-style_image", help="Style target image", default='none')
+parser.add_argument("-style_blend_weights", default=None)
+parser.add_argument("-content_image", help="Content target image", default='none')
+parser.add_argument("-image_size", help="Maximum height / width of generated image", type=int, default=512)
+parser.add_argument("-gpu", help="Zero-indexed ID of the GPU to use; for CPU mode set -gpu = c", default=0)
+
+# Optimization options
+parser.add_argument("-content_weight", type=float, default=5e0)
+parser.add_argument("-style_weight", type=float, default=1e2)
+parser.add_argument("-normalize_weights", action='store_true')
+parser.add_argument("-normalize_gradients", action='store_true')
+parser.add_argument("-tv_weight", type=float, default=1e-3)
+parser.add_argument("-num_iterations", type=int, default=1000)
+parser.add_argument("-init", choices=['random', 'image'], default='random')
+parser.add_argument("-init_image", default=None)
+parser.add_argument("-optimizer", choices=['lbfgs', 'adam'], default='lbfgs')
+parser.add_argument("-learning_rate", type=float, default=1e0)
+parser.add_argument("-lbfgs_num_correction", type=int, default=100)
+
+# Output options
+parser.add_argument("-print_iter", type=int, default=50)
+parser.add_argument("-save_iter", type=int, default=100)
+parser.add_argument("-output_image", default='out.png')
+
+# Other options
+parser.add_argument("-style_scale", type=float, default=1.0)
+parser.add_argument("-original_colors", type=int, choices=[0, 1], default=0)
+parser.add_argument("-pooling", choices=['avg', 'max'], default='max')
+parser.add_argument("-model_file", type=str, default='/kaggle/working/models/vgg19-d01eb7cb.pth')
+parser.add_argument("-disable_check", action='store_true')
+parser.add_argument("-backend", choices=['nn', 'cudnn', 'mkl', 'mkldnn', 'openmp', 'mkl,cudnn', 'cudnn,mkl'], default='nn')
+parser.add_argument("-cudnn_autotune", action='store_true')
+parser.add_argument("-seed", type=int, default=-1)
+
+parser.add_argument("-content_layers", help="layers for content", default='relu4_2')
+parser.add_argument("-style_layers", help="layers for style", default='relu1_1,relu2_1,relu3_1,relu4_1,relu5_1')
+
+parser.add_argument("-multidevice_strategy", default='4,7,29')
+
+params, unknown = parser.parse_known_args()
+
 
 Image.MAX_IMAGE_PIXELS = 1000000000 # Support gigapixel images
 
-"""
-what has been done:
-all params.args have been changed
-"""
 
-def style_transfer(style_location, content_location, output_location, 
-    p_style_weight=1e2, p_content_weight=5e0, p_num_iterations=1000, p_learning_rate = 1e0, 
-    p_gpu=0, p_image_size=512, p_style_blend_weights=None, p_normalize_weights=False, p_normalize_gradients=False, p_tv_weight=1e-3, p_init='random', p_init_image=None, p_optimizer='lbfgs', 
-    p_lbfgs_num_correction=100,
-    p_print_iter=0, p_save_iter=0, p_style_scale=1.0, p_original_colors = 0, p_model_file='models/vgg19-d01eb7cb.pth', p_disable_check=False, 
-    p_backend='nn', p_cudnn_autotune=False, p_pooling='max',
-    p_seed=-1, p_content_layers='relu4_2', p_style_layers='relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', p_multidevice_strategy='4,7,29'):
+def main():
+    download_models.main(os.path.dirname(params.model_file))
+    
+    dtype, multidevice, backward_device = setup_gpu()
 
-    dtype, multidevice, backward_device = setup_gpu(p_backend, p_cudnn_autotune, p_gpu)
-    cnn, layerList = loadCaffemodel(p_model_file, p_pooling, p_gpu, p_disable_check)
+    cnn, layerList = loadCaffemodel(params.model_file, params.pooling, params.gpu, params.disable_check)
 
-    content_image = preprocess(content_location, p_image_size).type(dtype)
-    style_image_input = style_location.split(',')
+    content_image = preprocess(params.content_image, params.image_size).type(dtype)
+    style_image_input = params.style_image.split(',')
     style_image_list, ext = [], [".jpg", ".jpeg", ".png", ".tiff"]
     for image in style_image_input:
         if os.path.isdir(image):
@@ -38,24 +79,24 @@ def style_transfer(style_location, content_location, output_location,
             style_image_list.append(image)
     style_images_caffe = []
     for image in style_image_list:
-        style_size = int(p_image_size * p_style_scale)
+        style_size = int(params.image_size * params.style_scale)
         img_caffe = preprocess(image, style_size).type(dtype)
         style_images_caffe.append(img_caffe)
 
-    if p_init_image != None:
+    if params.init_image not in [None, "None"]:
         image_size = (content_image.size(2), content_image.size(3))
-        init_image = preprocess(p_init_image, image_size).type(dtype)
+        init_image = preprocess(params.init_image, image_size).type(dtype)
 
     # Handle style blending weights for multiple style inputs
     style_blend_weights = []
-    if p_style_blend_weights == None:
+    if params.style_blend_weights in [None, "None"]:
         # Style blending not specified, so use equal weighting
         for i in style_image_list:
             style_blend_weights.append(1.0)
         for i, blend_weights in enumerate(style_blend_weights):
             style_blend_weights[i] = int(style_blend_weights[i])
     else:
-        style_blend_weights = p_style_blend_weights.split(',')
+        style_blend_weights = params.style_blend_weights.split(',')
         assert len(style_blend_weights) == len(style_image_list), \
           "-style_blend_weights and -style_images must have the same number of elements!"
 
@@ -67,8 +108,8 @@ def style_transfer(style_location, content_location, output_location,
     for i, blend_weights in enumerate(style_blend_weights):
         style_blend_weights[i] = float(style_blend_weights[i]) / float(style_blend_sum)
 
-    content_layers = p_content_layers.split(',')
-    style_layers = p_style_layers.split(',')
+    content_layers = params.content_layers.split(',')
+    style_layers = params.style_layers.split(',')
 
     # Set up the network, inserting style and content loss modules
     cnn = copy.deepcopy(cnn)
@@ -76,8 +117,8 @@ def style_transfer(style_location, content_location, output_location,
     next_content_idx, next_style_idx = 1, 1
     net = nn.Sequential()
     c, r = 0, 0
-    if p_tv_weight > 0:
-        tv_mod = TVLoss(p_tv_weight).type(dtype)
+    if params.tv_weight > 0:
+        tv_mod = TVLoss(params.tv_weight).type(dtype)
         net.add_module(str(len(net)), tv_mod)
         tv_losses.append(tv_mod)
 
@@ -87,14 +128,16 @@ def style_transfer(style_location, content_location, output_location,
                 net.add_module(str(len(net)), layer)
 
                 if layerList['C'][c] in content_layers:
-                    print("Setting up content layer " + str(i) + ": " + str(layerList['C'][c]))
-                    loss_module = ContentLoss(p_content_weight, p_normalize_gradients)
+                    #NO PRINTING
+                    #print("Setting up content layer " + str(i) + ": " + str(layerList['C'][c]))
+                    loss_module = ContentLoss(params.content_weight, params.normalize_gradients)
                     net.add_module(str(len(net)), loss_module)
                     content_losses.append(loss_module)
 
                 if layerList['C'][c] in style_layers:
-                    print("Setting up style layer " + str(i) + ": " + str(layerList['C'][c]))
-                    loss_module = StyleLoss(p_style_weight, p_normalize_gradients)
+                    #NO PRINTING
+                    #print("Setting up style layer " + str(i) + ": " + str(layerList['C'][c]))
+                    loss_module = StyleLoss(params.style_weight, params.normalize_gradients)
                     net.add_module(str(len(net)), loss_module)
                     style_losses.append(loss_module)
                 c+=1
@@ -103,15 +146,17 @@ def style_transfer(style_location, content_location, output_location,
                 net.add_module(str(len(net)), layer)
 
                 if layerList['R'][r] in content_layers:
-                    print("Setting up content layer " + str(i) + ": " + str(layerList['R'][r]))
-                    loss_module = ContentLoss(p_content_weight, p_normalize_gradients)
+                    #NO PRINTING
+                    #print("Setting up content layer " + str(i) + ": " + str(layerList['R'][r]))
+                    loss_module = ContentLoss(params.content_weight, params.normalize_gradients)
                     net.add_module(str(len(net)), loss_module)
                     content_losses.append(loss_module)
                     next_content_idx += 1
 
                 if layerList['R'][r] in style_layers:
-                    print("Setting up style layer " + str(i) + ": " + str(layerList['R'][r]))
-                    loss_module = StyleLoss(p_style_weight, p_normalize_gradients)
+                    #NO PRINTING
+                    #print("Setting up style layer " + str(i) + ": " + str(layerList['R'][r]))
+                    loss_module = StyleLoss(params.style_weight, params.normalize_gradients)
                     net.add_module(str(len(net)), loss_module)
                     style_losses.append(loss_module)
                     next_style_idx += 1
@@ -121,13 +166,14 @@ def style_transfer(style_location, content_location, output_location,
                 net.add_module(str(len(net)), layer)
 
     if multidevice:
-        net = setup_multi_device(net, p_gpu, p_multidevice_strategy)
+        net = setup_multi_device(net)
 
     # Capture content targets
     for i in content_losses:
         i.mode = 'capture'
-    print("Capturing content targets")
-    print_torch(net, multidevice)
+    #NO PRINTING
+    #print("Capturing content targets")
+    #print_torch(net, multidevice)
     net(content_image)
 
     # Capture style targets
@@ -148,7 +194,7 @@ def style_transfer(style_location, content_location, output_location,
         i.mode = 'loss'
 
     # Maybe normalize content and style weights
-    if p_normalize_weights:
+    if params.normalize_weights:
         normalize_weights(content_losses, style_losses)
 
     # Freeze the network in order to prevent
@@ -157,23 +203,23 @@ def style_transfer(style_location, content_location, output_location,
         param.requires_grad = False
 
     # Initialize the image
-    if p_seed >= 0:
-        torch.manual_seed(p_seed)
-        torch.cuda.manual_seed_all(p_seed)
+    if params.seed >= 0:
+        torch.manual_seed(params.seed)
+        torch.cuda.manual_seed_all(params.seed)
         torch.backends.cudnn.deterministic=True
-    if p_init == 'random':
+    if params.init == 'random':
         B, C, H, W = content_image.size()
         img = torch.randn(C, H, W).mul(0.001).unsqueeze(0).type(dtype)
-    elif p_init == 'image':
-        if p_init_image != None:
+    elif params.init == 'image':
+        if params.init_image != None:
             img = init_image.clone()
         else:
             img = content_image.clone()
     img = nn.Parameter(img)
 
     def maybe_print(t, loss):
-        if p_print_iter > 0 and t % p_print_iter == 0:
-            print("Iteration " + str(t) + " / "+ str(p_num_iterations))
+        if params.print_iter > 0 and t % params.print_iter == 0:
+            print("Iteration " + str(t) + " / "+ str(params.num_iterations))
             for i, loss_module in enumerate(content_losses):
                 print("  Content " + str(i+1) + " loss: " + str(loss_module.loss.item()))
             for i, loss_module in enumerate(style_losses):
@@ -181,20 +227,21 @@ def style_transfer(style_location, content_location, output_location,
             print("  Total loss: " + str(loss.item()))
 
     def maybe_save(t):
-        should_save = p_save_iter > 0 and t % p_save_iter == 0
-        should_save = should_save or t == p_num_iterations
+        should_save = params.save_iter > 0 and t % params.save_iter == 0
+        should_save = should_save or t == params.num_iterations
         if should_save:
-            output_filename, file_extension = os.path.splitext(output_location)
-            if t == p_num_iterations:
+            output_filename, file_extension = os.path.splitext(params.output_image)
+            if t == params.num_iterations:
                 filename = output_filename + str(file_extension)
             else:
                 filename = str(output_filename) + "_" + str(t) + str(file_extension)
             disp = deprocess(img.clone())
 
             # Maybe perform postprocessing for color-independent style transfer
-            if p_original_colors == 1:
+            if params.original_colors == 1:
                 disp = original_colors(deprocess(content_image.clone()), disp)
-
+            
+            os.makedirs(os.path.dirname(params.output_image), exist_ok=True)
             disp.save(str(filename))
 
     # Function to evaluate loss and gradient. We run the net forward and
@@ -213,7 +260,7 @@ def style_transfer(style_location, content_location, output_location,
             loss += mod.loss.to(backward_device)
         for mod in style_losses:
             loss += mod.loss.to(backward_device)
-        if p_tv_weight > 0:
+        if params.tv_weight > 0:
             for mod in tv_losses:
                 loss += mod.loss.to(backward_device)
 
@@ -224,51 +271,51 @@ def style_transfer(style_location, content_location, output_location,
 
         return loss
 
-    optimizer, loopVal = setup_optimizer(img, p_optimizer, p_num_iterations, p_lbfgs_num_correction, p_learning_rate)
+    optimizer, loopVal = setup_optimizer(img)
     while num_calls[0] <= loopVal:
          optimizer.step(feval)
 
 
 # Configure the optimizer
-def setup_optimizer(img, p_optimizer, p_num_iterations, p_lbfgs_num_correction, p_learning_rate):
-    if p_optimizer == 'lbfgs':
+def setup_optimizer(img):
+    if params.optimizer == 'lbfgs':
         print("Running optimization with L-BFGS")
         optim_state = {
-            'max_iter': p_num_iterations,
+            'max_iter': params.num_iterations,
             'tolerance_change': -1,
             'tolerance_grad': -1,
         }
-        if p_lbfgs_num_correction != 100:
-            optim_state['history_size'] = p_lbfgs_num_correction
+        if params.lbfgs_num_correction != 100:
+            optim_state['history_size'] = params.lbfgs_num_correction
         optimizer = optim.LBFGS([img], **optim_state)
         loopVal = 1
-    elif p_optimizer == 'adam':
+    elif params.optimizer == 'adam':
         print("Running optimization with ADAM")
-        optimizer = optim.Adam([img], lr = p_learning_rate)
-        loopVal = p_num_iterations - 1
+        optimizer = optim.Adam([img], lr = params.learning_rate)
+        loopVal = params.num_iterations - 1
     return optimizer, loopVal
 
 
-def setup_gpu(p_backend, p_cudnn_autotune, p_gpu):
+def setup_gpu():
     def setup_cuda():
-        if 'cudnn' in p_backend:
+        if 'cudnn' in params.backend:
             torch.backends.cudnn.enabled = True
-            if p_cudnn_autotune:
+            if params.cudnn_autotune:
                 torch.backends.cudnn.benchmark = True
         else:
             torch.backends.cudnn.enabled = False
 
     def setup_cpu():
-        if 'mkl' in p_backend and 'mkldnn' not in p_backend:
+        if 'mkl' in params.backend and 'mkldnn' not in params.backend:
             torch.backends.mkl.enabled = True
-        elif 'mkldnn' in p_backend:
+        elif 'mkldnn' in params.backend:
             raise ValueError("MKL-DNN is not supported yet.")
-        elif 'openmp' in p_backend:
+        elif 'openmp' in params.backend:
             torch.backends.openmp.enabled = True
 
     multidevice = False
-    if "," in str(p_gpu):
-        devices = p_gpu.split(',')
+    if "," in str(params.gpu):
+        devices = params.gpu.split(',')
         multidevice = True
 
         if 'c' in str(devices[0]).lower():
@@ -279,20 +326,20 @@ def setup_gpu(p_backend, p_cudnn_autotune, p_gpu):
             setup_cuda()
         dtype = torch.FloatTensor
 
-    elif "c" not in str(p_gpu).lower():
+    elif "c" not in str(params.gpu).lower():
         setup_cuda()
-        dtype, backward_device = torch.cuda.FloatTensor, "cuda:" + str(p_gpu)
+        dtype, backward_device = torch.cuda.FloatTensor, "cuda:" + str(params.gpu)
     else:
         setup_cpu()
         dtype, backward_device = torch.FloatTensor, "cpu"
     return dtype, multidevice, backward_device
 
 
-def setup_multi_device(net, p_gpu, p_multidevice_strategy):
-    assert len(p_gpu.split(',')) - 1 == len(p_multidevice_strategy.split(',')), \
+def setup_multi_device(net):
+    assert len(params.gpu.split(',')) - 1 == len(params.multidevice_strategy.split(',')), \
       "The number of -multidevice_strategy layer indices minus 1, must be equal to the number of -gpu devices."
 
-    new_net = ModelParallel(net, p_gpu, p_multidevice_strategy)
+    new_net = ModelParallel(net, params.gpu, params.multidevice_strategy)
     return new_net
 
 
@@ -453,57 +500,18 @@ class TVLoss(nn.Module):
         return input
 
 
-#if __name__ == "__main__":
-#    main()
+
+if __name__ == "__main__":
+    if (params.style_image == 'none') or (params.content_image == 'none'):
+        pass
+    else:
+        main()
     
-    
-    
-
-    
-'''
-parsing arguments
-import argparse
-parser = argparse.ArgumentParser()
-# Basic options
-parser.add_argument("-style_image", help="Style target image", default='examples/inputs/seated-nude.jpg')
-parser.add_argument("-style_blend_weights", default=None)
-parser.add_argument("-content_image", help="Content target image", default='examples/inputs/tubingen.jpg')
-parser.add_argument("-image_size", help="Maximum height / width of generated image", type=int, default=512)
-parser.add_argument("-gpu", help="Zero-indexed ID of the GPU to use; for CPU mode set -gpu = c", default=0)
-
-# Optimization options
-parser.add_argument("-content_weight", type=float, default=5e0)
-parser.add_argument("-style_weight", type=float, default=1e2)
-parser.add_argument("-normalize_weights", action='store_true')
-parser.add_argument("-normalize_gradients", action='store_true')
-parser.add_argument("-tv_weight", type=float, default=1e-3)
-parser.add_argument("-num_iterations", type=int, default=1000)
-parser.add_argument("-init", choices=['random', 'image'], default='random')
-parser.add_argument("-init_image", default=None)
-parser.add_argument("-optimizer", choices=['lbfgs', 'adam'], default='lbfgs')
-parser.add_argument("-learning_rate", type=float, default=1e0)
-parser.add_argument("-lbfgs_num_correction", type=int, default=100)
-
-# Output options
-parser.add_argument("-print_iter", type=int, default=50)
-parser.add_argument("-save_iter", type=int, default=100)
-parser.add_argument("-output_image", default='out.png')
-
-# Other options
-parser.add_argument("-style_scale", type=float, default=1.0)
-parser.add_argument("-original_colors", type=int, choices=[0, 1], default=0)
-parser.add_argument("-pooling", choices=['avg', 'max'], default='max')
-parser.add_argument("-model_file", type=str, default='models/vgg19-d01eb7cb.pth')
-parser.add_argument("-disable_check", action='store_true')
-parser.add_argument("-backend", choices=['nn', 'cudnn', 'mkl', 'mkldnn', 'openmp', 'mkl,cudnn', 'cudnn,mkl'], default='nn')
-parser.add_argument("-cudnn_autotune", action='store_true')
-parser.add_argument("-seed", type=int, default=-1)
-
-parser.add_argument("-content_layers", help="layers for content", default='relu4_2')
-parser.add_argument("-style_layers", help="layers for style", default='relu1_1,relu2_1,relu3_1,relu4_1,relu5_1')
-
-parser.add_argument("-multidevice_strategy", default='4,7,29')
-params = parser.parse_args()
-'''
-
-
+"""
+#removing folders to reset environment
+import shutil
+import glob
+files = sorted(glob.glob("/kaggle/working/"))
+print(files)
+shutil.rmtree("/kaggle/working/models")
+"""

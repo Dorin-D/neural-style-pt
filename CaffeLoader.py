@@ -1,3 +1,5 @@
+# %% [code]
+# %% [code] {"jupyter":{"outputs_hidden":false},"execution":{"iopub.status.busy":"2022-11-19T15:59:36.085799Z","iopub.execute_input":"2022-11-19T15:59:36.086193Z","iopub.status.idle":"2022-11-19T15:59:36.139448Z","shell.execute_reply.started":"2022-11-19T15:59:36.086160Z","shell.execute_reply":"2022-11-19T15:59:36.138200Z"}}
 import torch
 import torch.nn as nn
 
@@ -249,6 +251,9 @@ def loadCaffemodel(model_file, pooling, use_gpu, disable_check):
         cnn = cnn.cuda()
     cnn = cnn.features
 
-    print_loadcaffe(cnn, layerList)
+    #NO PRINTING!!!!!!
+    #print_loadcaffe(cnn, layerList)
 
     return cnn, layerList
+
+# %% [code]
