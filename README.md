@@ -39,7 +39,6 @@ If there aren't n_classes with n_styles*n_samples images, you will be informed.)
 * Content folder format
   * data: folder containing all images
   * labels.csv : csv file with columns "FILENAME", "CATEGORY": FILENAME is the name of files inside data (e.g. "applauding_001.jpg"), CATEGORY is the class of the images
-  * location_styles : path to your style dataset
 
 * Style folder format:
   * data: folder containing all style images
