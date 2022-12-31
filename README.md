@@ -31,7 +31,7 @@ If there aren't n_classes with n_styles*n_samples images, you will be informed.)
 
 
 * To create the stylized dataset, you need to set the following variables:
-  * command, in function create_stylized_dataset : 
+  * command, in function create_stylized_data_from_labels : 
   * p_model_location : path where to download the neural style transfer model
   * location : path to your content dataset
 
@@ -54,6 +54,6 @@ The output folder will contain a folder "data", same as with style/content datas
   * "ORIG_STYLE_FILENAME"
   * "FILENAME", where "FILENAME" is the original style filename merged with the content filename, with an underscore inbetween (e.g. style.jpg + content.jpg => style.jpg_content.jpg)
  
-create_stylized_dataset : you can set in this function the parameters you want to use for the neural style transfer (e.g. whether to use color transfer, the learning rate, weight of styles etc, see commented lines for relevant variables)
+create_stylized_data_from_labels : you can set in this function the parameters you want to use for the neural style transfer (e.g. whether to use color transfer, the learning rate, weight of styles etc, see commented lines for relevant variables)
 
 
